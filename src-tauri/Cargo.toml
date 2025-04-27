@@ -1,0 +1,34 @@
+[package]
+name = "new-image-tiler"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "new_image_tiler_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Remove tauri-plugin-opener if not used elsewhere
+# tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2.0.0-beta.3"
+tauri-plugin-fs = "2.0.0-beta.3"
+tauri-plugin-shell = "2.0.0-beta.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", features = ["png", "jpeg"] } # For image processing
+zip = { version = "2.1", default-features = false, features = ["deflate"] } # For creating zip archives
+base64 = "0.22" # For decoding image data from frontend
+tempfile = "3.10" # For potentially storing tiles temporarily before zipping
+thiserror = "1.0" # For better error handling
+

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "new-image-tiler",
+  "version": "0.1.0",
+  "identifier": "com.new-image-tiler.app",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "new-image-tiler",
+        "width": 800,
+        "height": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "capabilities": [
+      {
+        "identifier": "main-capability",
+        "description": "Capability for main window operations",
+        "windows": ["main"],
+        "permissions": [
+          "dialog:open",
+          "dialog:save",
+          "fs:read-binary-file",
+          "fs:write-binary-file",
+          {
+            "identifier": "fs:scope",
+            "allow": []
+          },
+          "core:default"
+        ]
+      }
+    ]
+  },
+  "plugins": {
+    "dialog": {},
+    "fs": {},
+    "shell": {}
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
