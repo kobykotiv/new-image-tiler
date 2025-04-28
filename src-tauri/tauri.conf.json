@@ -1,58 +1,35 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "new-image-tiler",
-  "version": "0.1.0",
-  "identifier": "com.new-image-tiler.app",
+  "$schema": "https://schema.tauri.app/v2/config.json",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
-    "frontendDist": "../dist"
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist"
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
   },
   "app": {
-    "windows": [
-      {
-        "title": "new-image-tiler",
-        "width": 800,
-        "height": 600
-      }
-    ],
     "security": {
       "csp": null
     },
-    "capabilities": [
+    "windows": [
       {
-        "identifier": "main-capability",
-        "description": "Capability for main window operations",
-        "windows": ["main"],
-        "permissions": [
-          "dialog:open",
-          "dialog:save",
-          "fs:read-binary-file",
-          "fs:write-binary-file",
-          {
-            "identifier": "fs:scope",
-            "allow": []
-          },
-          "core:default"
-        ]
+        "fullscreen": false,
+        "height": 700,
+        "resizable": true,
+        "title": "Image Tiler",
+        "width": 900
       }
     ]
   },
-  "plugins": {
-    "dialog": {},
-    "fs": {},
-    "shell": {}
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ]
-  }
+  "permissions": [
+    "dialog:*",
+    "fs:read",
+    "fs:write",
+    "path:*",
+    "shell:open"
+  ]
 }

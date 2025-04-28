@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/v2/capability.json",
+  "identifier": "fs",
+  "description": "File system access permissions for the Image Tiler app",
+  "context": "fs",
+  "windows": ["main"],
+  "permissions": [
+    {
+      "identifier": "read-folder",
+      "description": "Allows reading folders for image processing",
+      "paths": {
+        "type": "allow",
+        "sites": ["**/*"]
+      }
+    },
+    {
+      "identifier": "save-files",
+      "description": "Allows saving processed image files",
+      "paths": {
+        "type": "allow",
+        "sites": ["**/*"]
+      }
+    }
+  ]
+}

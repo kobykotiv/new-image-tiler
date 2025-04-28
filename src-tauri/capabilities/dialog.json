@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/v2/capability.json",
+  "identifier": "dialog",
+  "description": "Capability for file and folder selection dialogs",
+  "context": "dialog",
+  "windows": ["main"],
+  "permissions": [
+    {
+      "identifier": "open",
+      "description": "Allows opening file and folder selection dialogs",
+      "files": {
+        "type": "allow",
+        "sites": ["**/*"]
+      }
+    }
+  ]
+}

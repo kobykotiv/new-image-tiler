@@ -15,9 +15,21 @@ Create a modern, performant cross-platform desktop application using Tauri as th
 ### Project Setup
 
 ```bash
+# Unix/Linux/MacOS
 # Install Tauri prerequisites first (Rust, etc.)
-# Initialize project
 mkdir my-tauri-app && cd my-tauri-app
+bun create tauri-app
+
+# Add TypeScript and Tailwind CSS
+bun add -d typescript tailwindcss postcss autoprefixer
+bun x tailwindcss init -p
+```
+
+```powershell
+# Windows PowerShell
+# Install Tauri prerequisites first (Rust, etc.)
+New-Item -ItemType Directory -Name my-tauri-app
+Set-Location my-tauri-app
 bun create tauri-app
 
 # Add TypeScript and Tailwind CSS

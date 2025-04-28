@@ -2,6 +2,7 @@ import { useState, useRef, DragEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { writeFile, readFile } from "@tauri-apps/plugin-fs";
+import JSZip from 'jszip';
 
 // Helper function to convert file path to base64
 async function fileToBase64(filePath: string): Promise<string> {
@@ -26,7 +27,6 @@ function base64ToUint8Array(base64: string): Uint8Array {
     return bytes;
 }
 
-
 interface GridSize {
   cols: number;
   rows: number;
@@ -41,24 +41,26 @@ const gridOptions: GridSize[] = [
   { cols: 12, rows: 12 },
 ];
 
+const scaleOptions = [0.25, 0.5, 1, 2, 4, 8];
+
 function App() {
   const [selectedGrid, setSelectedGrid] = useState<GridSize>(gridOptions[0]);
   const [imagesBase64, setImagesBase64] = useState<string[]>([]);
-  const [outputImageBase64, setOutputImageBase64] = useState<string | null>(null);
+  const [outputImages, setOutputImages] = useState<string[]>([]); // Store all outputs
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  
-  const dropZoneRef = useRef<HTMLDivElement>(null);
+  const [selectedScale, setSelectedScale] = useState(1);
+  const [isDryRun, setIsDryRun] = useState(false);
+  const [addPerlin, setAddPerlin] = useState(false);
 
-  const numRequiredImages = selectedGrid.cols * selectedGrid.rows;
+  const dropZoneRef = useRef<HTMLDivElement>(null);
 
   const handleGridSelect = (grid: GridSize) => {
     setSelectedGrid(grid);
-    // Reset images if grid size changes, as the required number changes
     setImagesBase64([]);
-    setOutputImageBase64(null);
+    setOutputImages([]);
     setError(null);
     setSuccess(null);
   };
@@ -66,43 +68,27 @@ function App() {
   const handleImageSelect = async () => {
     setError(null);
     setSuccess(null);
-    setOutputImageBase64(null);
+    setOutputImages([]);
     try {
       const selectedPaths = await open({
         multiple: true,
-        title: `Select ${numRequiredImages} Images`,
-        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }], // Added webp
+        title: `Select up to 100 seamless tiles (1024x1024)`,
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
       });
 
       if (selectedPaths) {
-        // If user selects more/less than required, inform them.
-        // For simplicity, we'll just take the required number if they select more,
-        // or show an error if they select less.
         const pathsArray = Array.isArray(selectedPaths) ? selectedPaths : [selectedPaths];
-
-        if (pathsArray.length < numRequiredImages) {
-            setError(`Please select exactly ${numRequiredImages} images. You selected ${pathsArray.length}.`);
-            setImagesBase64([]); // Clear selection on error
-            return;
+        if (pathsArray.length > 100) {
+          setError("You can upload up to 100 images at once.");
+          setImagesBase64([]);
+          return;
         }
-
-        // Take only the required number of images
-        const requiredPaths = pathsArray.slice(0, numRequiredImages);
-
-        setIsLoading(true); // Show loading while converting
-        const base64Promises = requiredPaths.map(path => fileToBase64(path));
+        setIsLoading(true);
+        const base64Promises = pathsArray.map(path => fileToBase64(path));
         const base64Results = await Promise.all(base64Promises);
         setImagesBase64(base64Results);
         setIsLoading(false);
-        
-        if (pathsArray.length > numRequiredImages) {
-            setError(`Warning: You selected ${pathsArray.length} images, but only the first ${numRequiredImages} were used for the ${selectedGrid.cols}x${selectedGrid.rows} grid.`);
-        } else {
-            setSuccess(`All ${numRequiredImages} images loaded successfully!`);
-        }
-      } else {
-        // User cancelled dialog
-        // setImagesBase64([]); // Optionally clear if you want cancellation to reset
+        setSuccess(`${base64Results.length} images loaded successfully!`);
       }
     } catch (err) {
       console.error("Error selecting images:", err);
@@ -112,25 +98,36 @@ function App() {
   };
 
   const handleTileImages = async () => {
-    if (imagesBase64.length !== numRequiredImages) {
-      setError(`Please select exactly ${numRequiredImages} images for a ${selectedGrid.cols}x${selectedGrid.rows} grid.`);
+    if (imagesBase64.length === 0) {
+      setError("Please upload at least one seamless tile image.");
       return;
     }
     setError(null);
     setSuccess(null);
     setIsLoading(true);
-    setOutputImageBase64(null);
+    setOutputImages([]);
 
     try {
-      const result = await invoke<string>("tile_images", {
-        args: {
-          images_base64: imagesBase64,
-          grid_cols: selectedGrid.cols,
-          grid_rows: selectedGrid.rows,
-        }
-      });
-      setOutputImageBase64(result);
-      setSuccess("Image tiled successfully!");
+      // For each image, tile it in the grid (repeat the same image)
+      const results: string[] = [];
+      for (let i = 0; i < imagesBase64.length; i++) {
+        const result = await invoke<string>("tile_seamless_image", {
+          args: {
+            image_base64: imagesBase64[i],
+            grid_cols: selectedGrid.cols,
+            grid_rows: selectedGrid.rows,
+            scale: selectedScale,
+            dry_run: isDryRun,
+            perlin_noise: addPerlin
+          }
+        });
+        results.push(result);
+      }
+      setOutputImages(results);
+      setSuccess(isDryRun
+        ? `Dry run previews generated for ${results.length} images!`
+        : `Tiled outputs generated for ${results.length} images!`
+      );
     } catch (err) {
       console.error("Error tiling images:", err);
       setError(`Error tiling images: ${String(err)}`);
@@ -139,8 +136,8 @@ function App() {
     }
   };
 
- const handleSaveImage = async () => {
-    if (!outputImageBase64) return;
+  const handleSaveImage = async () => {
+    if (!outputImages.length) return;
     setError(null);
     setSuccess(null);
 
@@ -154,7 +151,7 @@ function App() {
 
       if (filePath) {
         setIsLoading(true);
-        const binaryData = base64ToUint8Array(outputImageBase64);
+        const binaryData = base64ToUint8Array(outputImages[0]);
         await writeFile(filePath, binaryData);
         setSuccess(`Image saved successfully to ${filePath}!`);
       }
@@ -162,7 +159,56 @@ function App() {
       console.error("Error saving image:", err);
       setError(`Error saving image: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
+    }
+  };
+
+  const handleDownloadZip = async () => {
+    try {
+      setIsLoading(true);
+      const zip = new JSZip();
+
+      // Add original images to zip
+      imagesBase64.forEach((img, index) => {
+        const imgData = img.split(',')[1];
+        zip.file(`original_${index + 1}.png`, imgData, { base64: true });
+      });
+
+      // Add tiled outputs to zip
+      outputImages.forEach((img, index) => {
+        const imgData = img.split(',')[1];
+        zip.file(
+          `tiled_${index + 1}_${selectedGrid.cols}x${selectedGrid.rows}_scale${selectedScale}${addPerlin ? '_perlin' : ''}.png`,
+          imgData,
+          { base64: true }
+        );
+      });
+
+      const content = await zip.generateAsync({ type: "blob" });
+
+      const reader = new FileReader();
+      reader.readAsDataURL(content);
+      reader.onload = async () => {
+        const base64data = reader.result as string;
+        const zipData = base64data.split(',')[1];
+
+        const filePath = await save({
+          filters: [{
+            name: 'Zip Archive',
+            extensions: ['zip']
+          }]
+        });
+
+        if (filePath) {
+          await writeFile(filePath, Buffer.from(zipData, 'base64'));
+          setSuccess("All files saved successfully!");
+        }
+      };
+    } catch (err) {
+      console.error("Error creating zip:", err);
+      setError(`Error creating zip file: ${err}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -219,41 +265,31 @@ function App() {
     setIsDragging(false);
     setError(null);
     setSuccess(null);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const fileList = e.dataTransfer.files;
-      const imageFiles = Array.from(fileList).filter(file => 
+      const imageFiles = Array.from(fileList).filter(file =>
         file.type.startsWith('image/')
       );
-      
+
       if (imageFiles.length === 0) {
         setError("No image files were dropped. Please drop image files only.");
         return;
       }
-      
-      if (imageFiles.length < numRequiredImages) {
-        setError(`Please drop exactly ${numRequiredImages} images. You dropped ${imageFiles.length}.`);
+      if (imageFiles.length > 100) {
+        setError("You can upload up to 100 images at once.");
         return;
       }
-      
+
       try {
         setIsLoading(true);
-        
-        // Take only the required number of images
-        const requiredFiles = imageFiles.slice(0, numRequiredImages);
-        const base64Results = await readFilesAsBase64(requiredFiles);
-        
+        const base64Results = await readFilesAsBase64(imageFiles);
         setImagesBase64(base64Results);
-        
-        if (imageFiles.length > numRequiredImages) {
-          setError(`Warning: You dropped ${imageFiles.length} images, but only the first ${numRequiredImages} were used for the ${selectedGrid.cols}x${selectedGrid.rows} grid.`);
-        } else {
-          setSuccess(`All ${numRequiredImages} images loaded successfully!`);
-        }
+        setIsLoading(false);
+        setSuccess(`${base64Results.length} images loaded successfully!`);
       } catch (err) {
         console.error("Error processing dropped images:", err);
         setError(`Error processing dropped images: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
         setIsLoading(false);
       }
     }
@@ -261,9 +297,9 @@ function App() {
 
   return (
     <main className="container mx-auto p-4 flex flex-col items-center space-y-6 bg-gray-100 dark:bg-gray-900 min-h-screen text-gray-800 dark:text-gray-200">
-      <h1 className="text-3xl font-bold mt-4">Image Tiler</h1>
+      <h1 className="text-3xl font-bold mt-4">Batch Seamless Tile Renderer</h1>
       <p className="text-center text-gray-600 dark:text-gray-400 max-w-md">
-        Select a grid size, upload images, and generate a tiled output image.
+        Upload up to 100 seamless tiles (1024x1024), select a grid, and generate repeated tiled outputs for each image.
       </p>
 
       {/* Grid Selection */}
@@ -282,6 +318,62 @@ function App() {
             {grid.cols}x{grid.rows}
           </button>
         ))}
+      </div>
+
+      {/* Scale Selection */}
+      <div className="flex flex-wrap justify-center gap-2">
+        <span className="self-center mr-2 font-medium">Scale:</span>
+        {scaleOptions.map((scale) => (
+          <button
+            key={scale}
+            onClick={() => setSelectedScale(scale)}
+            className={`px-4 py-2 rounded transition-colors duration-200 ${
+              selectedScale === scale
+                ? "bg-blue-600 text-white"
+                : "bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600"
+            }`}
+          >
+            {scale}x
+          </button>
+        ))}
+      </div>
+
+      {/* Dry Run Toggle */}
+      <div className="flex items-center space-x-2">
+        <span className="font-medium">Dry Run Mode:</span>
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isDryRun}
+            onChange={() => setIsDryRun(!isDryRun)}
+            className="sr-only peer"
+          />
+          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+        </label>
+        <span className="text-xs text-gray-500 dark:text-gray-400 max-w-xs">
+          {isDryRun 
+            ? "Preview only: Faster but lower quality" 
+            : "Full process: High quality but slower"}
+        </span>
+      </div>
+
+      {/* Perlin Noise Toggle */}
+      <div className="flex items-center space-x-2">
+        <span className="font-medium">Add Perlin Noise:</span>
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={addPerlin}
+            onChange={() => setAddPerlin(!addPerlin)}
+            className="sr-only peer"
+          />
+          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+        </label>
+        <span className="text-xs text-gray-500 dark:text-gray-400 max-w-xs">
+          {addPerlin
+            ? "Subtle Perlin noise will be added to each tile."
+            : "No noise: output is a pure repeat."}
+        </span>
       </div>
 
       {/* Image Selection with Drag & Drop */}
@@ -303,17 +395,15 @@ function App() {
             className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200"
             disabled={isLoading}
           >
-            {isLoading ? "Loading..." : `Select Images (${imagesBase64.length} / ${numRequiredImages})`}
+            {isLoading ? "Loading..." : `Select Images (${imagesBase64.length} / 100)`}
           </button>
           
           <p className="text-sm mt-2 text-gray-600 dark:text-gray-400">
             {isDragging 
-              ? `Drop ${numRequiredImages} images here...` 
+              ? `Drop up to 100 seamless tiles here...` 
               : imagesBase64.length === 0 
-                ? `Click to select or drag & drop exactly ${numRequiredImages} images for the ${selectedGrid.cols}x${selectedGrid.rows} grid.`
-                : imagesBase64.length === numRequiredImages 
-                  ? `${numRequiredImages} images selected.` 
-                  : `Select ${numRequiredImages - imagesBase64.length} more images.`
+                ? `Click to select or drag & drop up to 100 seamless tiles (1024x1024). Each will be repeated in a ${selectedGrid.cols}x${selectedGrid.rows} grid.`
+                : `${imagesBase64.length} images selected.`
             }
           </p>
         </div>
@@ -348,10 +438,10 @@ function App() {
       {/* Tiling Button */}
       <button
         onClick={handleTileImages}
-        disabled={isLoading || imagesBase64.length !== numRequiredImages}
+        disabled={isLoading || imagesBase64.length === 0}
         className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded text-lg disabled:opacity-50 transition-colors duration-200 shadow-lg"
       >
-        {isLoading ? "Processing..." : "Generate Tiled Image"}
+        {isLoading ? "Processing..." : "Generate Tiled Outputs"}
       </button>
 
       {/* Success Message */}
@@ -369,20 +459,27 @@ function App() {
       )}
 
       {/* Output Display */}
-      {outputImageBase64 && (
+      {outputImages.length > 0 && (
         <div className="w-full max-w-3xl p-6 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 flex flex-col items-center space-y-4 shadow-xl">
-          <h2 className="text-xl font-semibold">Tiled Output Image</h2>
-          <img
-            src={outputImageBase64}
-            alt="Tiled Output"
-            className="max-w-full max-h-[70vh] h-auto rounded shadow-lg"
-          />
+          <h2 className="text-xl font-semibold">Tiled Output Images</h2>
+          <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+            {outputImages.map((img, idx) => (
+              <div key={idx} className="flex flex-col items-center">
+                <img
+                  src={img}
+                  alt={`Tiled Output ${idx + 1}`}
+                  className="max-w-full max-h-48 h-auto rounded shadow-lg"
+                />
+                <span className="text-xs mt-1">Output {idx + 1}</span>
+              </div>
+            ))}
+          </div>
           <button
-            onClick={handleSaveImage}
+            onClick={handleDownloadZip}
             disabled={isLoading}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200"
+            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200"
           >
-            {isLoading ? "Saving..." : "Save Image"}
+            {isLoading ? "Creating Zip..." : "Download All"}
           </button>
         </div>
       )}
