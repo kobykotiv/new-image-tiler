@@ -62,3 +62,41 @@ The application uses:
 ## License
 
 [MIT](LICENSE)
+
+
+
+## Releasing New Versions
+
+To release a new version of Image Tiler:
+
+1. Update the version in `package.json` and `src-tauri/Cargo.toml`
+2. Commit your changes
+3. Create and push a new tag:
+   ```bash
+   git tag -a v0.1.0 -m "Release v0.1.0"
+   git push origin v0.1.0
+   ```
+4. The GitHub Actions workflow will automatically:
+   - Create a new release on GitHub
+   - Build the application for Windows, macOS, and Linux
+   - Attach the installers to the release
+
+## Installation Instructions for Users
+
+### Windows
+1. Download the latest `image-tiler-v0.1.0-windows.msi` installer from the [Releases](https://github.com/yourusername/image-tiler/releases) page
+2. Double-click the MSI file and follow the installation wizard
+3. Launch "Image Tiler" from your Start Menu
+
+### macOS
+1. Download the latest `image-tiler-v0.1.0-macos.dmg` from the [Releases](https://github.com/yourusername/image-tiler/releases) page
+2. Open the DMG file and drag the app to your Applications folder
+3. Right-click the app and select "Open" the first time you run it
+
+### Linux (Debian/Ubuntu)
+1. Download the latest `image-tiler-v0.1.0-linux_amd64.deb` from the [Releases](https://github.com/yourusername/image-tiler/releases) page
+2. Install with:
+   ```bash
+   sudo dpkg -i image-tiler-v0.1.0-linux_amd64.deb
+   ```
+3. Launch from your applications menu or terminal
