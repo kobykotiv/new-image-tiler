@@ -1,4 +1,4 @@
-# Image Tiler
+# New Image Tiler
 
 A modern, cross-platform desktop application built with Tauri, Bun, TypeScript, and Tailwind CSS that allows users to upload multiple images and generate a tiled output image based on selectable grid sizes.
 
@@ -59,11 +59,38 @@ The application uses:
 - Tailwind CSS for styling
 - Image processing is done in Rust for optimal performance
 
+## Release Information
+
+**Version 1.0.0** is the first official release of New Image Tiler!
+
+## Installation
+
+```bash
+# Add installation instructions here
+# For example:
+npm install new-image-tiler
+# or if it's a CLI tool:
+npm install -g new-image-tiler
+```
+
+## Usage
+
+```javascript
+// Add usage examples here
+// For example, if it's a library:
+const tiler = require('new-image-tiler');
+
+tiler.tileImage('input.jpg', 'output_dir', { tileSize: 256 })
+  .then(() => console.log('Tiling complete!'))
+  .catch(err => console.error('Error tiling image:', err));
+
+// Or if it's a CLI tool:
+new-image-tiler --input input.jpg --output output_dir --tile-size 256
+```
+
 ## License
 
 [MIT](LICENSE)
-
-
 
 ## Releasing New Versions
 
