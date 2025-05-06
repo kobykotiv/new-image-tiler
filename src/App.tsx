@@ -1,6 +1,8 @@
-import { useState, useRef, DragEvent } from "react";
+import { useState, useRef, DragEvent, useEffect } from "react";
 import JSZip from 'jszip';
 import { useImageProcessing } from './hooks/use-image-processing';
+import { CarbonAds } from './components/CarbonAds';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 // Helper function to read file as base64
 async function fileToBase64(file: File): Promise<string> {
@@ -53,10 +55,19 @@ function App() {
   const [selectedScale, setSelectedScale] = useState(1);
   const [isDryRun, setIsDryRun] = useState(false);
   const [addPerlin, setAddPerlin] = useState(false);
+  const [progress, setProgress] = useState(0);
 
-  const { processImages, isProcessing: processing, progress } = useImageProcessing();
+  const { processImages, isProcessing: processing } = useImageProcessing();
 
   const dropZoneRef = useRef<HTMLDivElement>(null);
+  const scrollParentRef = useRef<HTMLDivElement>(null);
+  
+  const rowVirtualizer = useVirtualizer({
+    count: outputImages.length,
+    getScrollElement: () => scrollParentRef.current,
+    estimateSize: () => 300, // Estimated row height
+    overscan: 5
+  });
 
   const handleGridSelect = (grid: GridSize) => {
     setSelectedGrid(grid);
@@ -135,18 +146,34 @@ function App() {
     try {
       setIsLoading(true);
       const zip = new JSZip();
+      const BATCH_SIZE = 10;
 
-      // Only add tiled outputs to zip
-      outputImages.forEach((img, index) => {
-        const imgData = img.split(',')[1];
-        zip.file(
-          `tiled_${index + 1}_${selectedGrid.cols}x${selectedGrid.rows}_scale${selectedScale}${addPerlin ? '_perlin' : ''}.png`,
-          imgData,
-          { base64: true }
-        );
+      // Process in batches
+      for (let i = 0; i < outputImages.length; i += BATCH_SIZE) {
+        const batch = outputImages.slice(i, Math.min(i + BATCH_SIZE, outputImages.length));
+        
+        await Promise.all(batch.map((img, idx) => {
+          const actualIdx = i + idx;
+          const imgData = img.split(',')[1];
+          return zip.file(
+            `tiled_${actualIdx + 1}_${selectedGrid.cols}x${selectedGrid.rows}_scale${selectedScale}${addPerlin ? '_perlin' : ''}.png`,
+            imgData,
+            { base64: true }
+          );
+        }));
+
+        // Update progress
+        setProgress((Math.min(i + BATCH_SIZE, outputImages.length) / outputImages.length) * 100);
+        
+        // Allow UI to update
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      const blob = await zip.generateAsync({ 
+        type: "blob",
+        compression: "STORE" // Faster, since PNGs are already compressed
       });
-
-      const blob = await zip.generateAsync({ type: "blob" });
+      
       downloadBlob(blob, "tiled-outputs.zip");
       setSuccess("All tiled outputs saved successfully!");
     } catch (err) {
@@ -154,6 +181,7 @@ function App() {
       setError(`Error creating zip file: ${err}`);
     } finally {
       setIsLoading(false);
+      setProgress(0);
     }
   };
 
@@ -423,41 +451,65 @@ function App() {
       {outputImages.length > 0 && (
         <div className="w-full max-w-4xl p-6 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 flex flex-col items-center space-y-4 shadow-xl">
           <h2 className="text-xl font-semibold">Tiled Output Images</h2>
-          <div className="grid gap-6 w-full">
-            {outputImages.map((img, idx) => (
-              <div key={idx} className="flex flex-col items-center">
-                <div className="relative group w-full max-w-[1024px]">
-                  <img
-                    src={img}
-                    alt={`Tiled Output ${idx + 1}`}
-                    className="w-full h-auto rounded shadow-lg bg-neutral-100 dark:bg-neutral-800"
-                    style={{ imageRendering: 'pixelated' }}
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle">❌</text></svg>';
-                      target.className += ' bg-red-50 dark:bg-red-900/20';
-                    }}
-                  />
-                  <div className="absolute inset-0 w-full h-full flex items-center justify-center gap-4 bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded">
-                    <button
-                      onClick={() => window.open(img, '_blank')}
-                      className="px-3 py-1.5 bg-blue-600 rounded hover:bg-blue-700 transition-colors"
-                    >
-                      View Full Size
-                    </button>
-                    <button
-                      onClick={() => handleSingleImageDownload(img, idx)}
-                      className="px-3 py-1.5 bg-green-600 rounded hover:bg-green-700 transition-colors"
-                    >
-                      Download
-                    </button>
+          <div 
+            ref={scrollParentRef}
+            className="w-full max-h-[600px] overflow-auto"
+          >
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualItem) => (
+                <div
+                  key={virtualItem.key}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: virtualItem.size,
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <div className="flex flex-col items-center p-4">
+                    <div className="relative group w-full max-w-[1024px]">
+                      <img
+                        src={outputImages[virtualItem.index]}
+                        alt={`Tiled Output ${virtualItem.index + 1}`}
+                        className="w-full h-auto rounded shadow-lg bg-neutral-100 dark:bg-neutral-800"
+                        loading="lazy"
+                        style={{ imageRendering: 'pixelated' }}
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle">❌</text></svg>';
+                          target.className += ' bg-red-50 dark:bg-red-900/20';
+                        }}
+                      />
+                      <div className="absolute inset-0 w-full h-full flex items-center justify-center gap-4 bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded">
+                        <button
+                          onClick={() => window.open(outputImages[virtualItem.index], '_blank')}
+                          className="px-3 py-1.5 bg-blue-600 rounded hover:bg-blue-700 transition-colors"
+                        >
+                          View Full Size
+                        </button>
+                        <button
+                          onClick={() => handleSingleImageDownload(outputImages[virtualItem.index], virtualItem.index)}
+                          className="px-3 py-1.5 bg-green-600 rounded hover:bg-green-700 transition-colors"
+                        >
+                          Download
+                        </button>
+                      </div>
+                    </div>
+                    <div className="text-xs mt-2 text-gray-600 dark:text-gray-400">
+                      Tiled Output {virtualItem.index + 1} ({selectedGrid.cols}x{selectedGrid.rows} at {selectedScale}x scale)
+                    </div>
                   </div>
                 </div>
-                <div className="text-xs mt-2 text-gray-600 dark:text-gray-400">
-                  Tiled Output {idx + 1} ({selectedGrid.cols}x{selectedGrid.rows} at {selectedScale}x scale)
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
           <button
             onClick={handleDownloadZip}
@@ -471,8 +523,11 @@ function App() {
 
       {/* Footer */}
       <footer className="mt-8 text-sm text-gray-500 dark:text-gray-400 text-center pb-6">
-        Built with Tauri, React, TypeScript, and Tailwind CSS
+        Built with React, TypeScript, and Tailwind CSS
       </footer>
+
+      {/* Add Carbon Ads */}
+      <CarbonAds />
     </main>
   );
 }
