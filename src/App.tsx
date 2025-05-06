@@ -1,31 +1,32 @@
-import { useState, useRef, DragEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { writeFile, readFile } from "@tauri-apps/plugin-fs";
+import { useState, useRef, DragEvent, useEffect } from "react";
 import JSZip from 'jszip';
+import { useImageProcessing } from './hooks/use-image-processing';
+import { CarbonAds } from './components/CarbonAds';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
-// Helper function to convert file path to base64
-async function fileToBase64(filePath: string): Promise<string> {
-  const binaryData = await readFile(filePath);
-  const base64String = btoa(
-    String.fromCharCode(...new Uint8Array(binaryData))
-  );
-  // Attempt to guess mime type from extension for the data URL
-  const extension = filePath.split('.').pop()?.toLowerCase() || 'png';
-  const mimeType = `image/${extension === 'jpg' ? 'jpeg' : extension}`;
-  return `data:${mimeType};base64,${base64String}`;
+// Helper function to read file as base64
+async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
-// Helper function to decode base64 to Uint8Array
-function base64ToUint8Array(base64: string): Uint8Array {
-    const binaryString = atob(base64.split(',')[1]); // Remove data URL prefix
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes;
+// Create blob URL for download
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
+
+// Remove unused base64ToUint8Array function
 
 interface GridSize {
   cols: number;
@@ -54,8 +55,19 @@ function App() {
   const [selectedScale, setSelectedScale] = useState(1);
   const [isDryRun, setIsDryRun] = useState(false);
   const [addPerlin, setAddPerlin] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  const { processImages, isProcessing: processing } = useImageProcessing();
 
   const dropZoneRef = useRef<HTMLDivElement>(null);
+  const scrollParentRef = useRef<HTMLDivElement>(null);
+  
+  const rowVirtualizer = useVirtualizer({
+    count: outputImages.length,
+    getScrollElement: () => scrollParentRef.current,
+    estimateSize: () => 300, // Estimated row height
+    overscan: 5
+  });
 
   const handleGridSelect = (grid: GridSize) => {
     setSelectedGrid(grid);
@@ -70,26 +82,28 @@ function App() {
     setSuccess(null);
     setOutputImages([]);
     try {
-      const selectedPaths = await open({
-        multiple: true,
-        title: `Select up to 100 seamless tiles (1024x1024)`,
-        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
-      });
-
-      if (selectedPaths) {
-        const pathsArray = Array.isArray(selectedPaths) ? selectedPaths : [selectedPaths];
-        if (pathsArray.length > 100) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = 'image/*';
+      
+      input.onchange = async (e) => {
+        const files = Array.from((e.target as HTMLInputElement).files || []);
+        if (files.length > 100) {
           setError("You can upload up to 100 images at once.");
           setImagesBase64([]);
           return;
         }
+        
         setIsLoading(true);
-        const base64Promises = pathsArray.map(path => fileToBase64(path));
+        const base64Promises = files.map(file => fileToBase64(file));
         const base64Results = await Promise.all(base64Promises);
         setImagesBase64(base64Results);
         setIsLoading(false);
         setSuccess(`${base64Results.length} images loaded successfully!`);
-      }
+      };
+      
+      input.click();
     } catch (err) {
       console.error("Error selecting images:", err);
       setError(`Error selecting images: ${err instanceof Error ? err.message : String(err)}`);
@@ -108,21 +122,13 @@ function App() {
     setOutputImages([]);
 
     try {
-      // For each image, tile it in the grid (repeat the same image)
-      const results: string[] = [];
-      for (let i = 0; i < imagesBase64.length; i++) {
-        const result = await invoke<string>("tile_seamless_image", {
-          args: {
-            image_base64: imagesBase64[i],
-            grid_cols: selectedGrid.cols,
-            grid_rows: selectedGrid.rows,
-            scale: selectedScale,
-            dry_run: isDryRun,
-            perlin_noise: addPerlin
-          }
-        });
-        results.push(result);
-      }
+      const results = await processImages(imagesBase64, {
+        gridSize: selectedGrid,
+        scale: selectedScale,
+        addPerlin,
+        isDryRun
+      });
+      
       setOutputImages(results);
       setSuccess(isDryRun
         ? `Dry run previews generated for ${results.length} images!`
@@ -130,34 +136,7 @@ function App() {
       );
     } catch (err) {
       console.error("Error tiling images:", err);
-      setError(`Error tiling images: ${String(err)}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSaveImage = async () => {
-    if (!outputImages.length) return;
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const defaultPath = `tiled_image_${selectedGrid.cols}x${selectedGrid.rows}.png`;
-      const filePath = await save({
-        title: 'Save Tiled Image',
-        defaultPath: defaultPath,
-        filters: [{ name: 'PNG Image', extensions: ['png'] }],
-      });
-
-      if (filePath) {
-        setIsLoading(true);
-        const binaryData = base64ToUint8Array(outputImages[0]);
-        await writeFile(filePath, binaryData);
-        setSuccess(`Image saved successfully to ${filePath}!`);
-      }
-    } catch (err) {
-      console.error("Error saving image:", err);
-      setError(`Error saving image: ${err instanceof Error ? err.message : String(err)}`);
+      setError(`Error tiling images: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoading(false);
     }
@@ -167,49 +146,49 @@ function App() {
     try {
       setIsLoading(true);
       const zip = new JSZip();
+      const BATCH_SIZE = 10;
 
-      // Add original images to zip
-      imagesBase64.forEach((img, index) => {
-        const imgData = img.split(',')[1];
-        zip.file(`original_${index + 1}.png`, imgData, { base64: true });
+      // Process in batches
+      for (let i = 0; i < outputImages.length; i += BATCH_SIZE) {
+        const batch = outputImages.slice(i, Math.min(i + BATCH_SIZE, outputImages.length));
+        
+        await Promise.all(batch.map((img, idx) => {
+          const actualIdx = i + idx;
+          const imgData = img.split(',')[1];
+          return zip.file(
+            `tiled_${actualIdx + 1}_${selectedGrid.cols}x${selectedGrid.rows}_scale${selectedScale}${addPerlin ? '_perlin' : ''}.png`,
+            imgData,
+            { base64: true }
+          );
+        }));
+
+        // Update progress
+        setProgress((Math.min(i + BATCH_SIZE, outputImages.length) / outputImages.length) * 100);
+        
+        // Allow UI to update
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      const blob = await zip.generateAsync({ 
+        type: "blob",
+        compression: "STORE" // Faster, since PNGs are already compressed
       });
-
-      // Add tiled outputs to zip
-      outputImages.forEach((img, index) => {
-        const imgData = img.split(',')[1];
-        zip.file(
-          `tiled_${index + 1}_${selectedGrid.cols}x${selectedGrid.rows}_scale${selectedScale}${addPerlin ? '_perlin' : ''}.png`,
-          imgData,
-          { base64: true }
-        );
-      });
-
-      const content = await zip.generateAsync({ type: "blob" });
-
-      const reader = new FileReader();
-      reader.readAsDataURL(content);
-      reader.onload = async () => {
-        const base64data = reader.result as string;
-        const zipData = base64data.split(',')[1];
-
-        const filePath = await save({
-          filters: [{
-            name: 'Zip Archive',
-            extensions: ['zip']
-          }]
-        });
-
-        if (filePath) {
-          await writeFile(filePath, Buffer.from(zipData, 'base64'));
-          setSuccess("All files saved successfully!");
-        }
-      };
+      
+      downloadBlob(blob, "tiled-outputs.zip");
+      setSuccess("All tiled outputs saved successfully!");
     } catch (err) {
       console.error("Error creating zip:", err);
       setError(`Error creating zip file: ${err}`);
     } finally {
       setIsLoading(false);
+      setProgress(0);
     }
+  };
+
+  const handleSingleImageDownload = (imageData: string, index: number) => {
+    const imgData = imageData.split(',')[1];
+    const blob = new Blob([Uint8Array.from(atob(imgData), c => c.charCodeAt(0))], { type: 'image/png' });
+    downloadBlob(blob, `tiled_${index + 1}_${selectedGrid.cols}x${selectedGrid.rows}_scale${selectedScale}${addPerlin ? '_perlin' : ''}.png`);
   };
 
   // Helper function to read files as base64
@@ -435,14 +414,24 @@ function App() {
         )}
       </div>
 
-      {/* Tiling Button */}
-      <button
-        onClick={handleTileImages}
-        disabled={isLoading || imagesBase64.length === 0}
-        className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded text-lg disabled:opacity-50 transition-colors duration-200 shadow-lg"
-      >
-        {isLoading ? "Processing..." : "Generate Tiled Outputs"}
-      </button>
+      {/* Tiling Button and Progress */}
+      <div className="flex flex-col items-center gap-2">
+        <button
+          onClick={handleTileImages}
+          disabled={isLoading || imagesBase64.length === 0}
+          className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded text-lg disabled:opacity-50 transition-colors duration-200 shadow-lg"
+        >
+          {isLoading ? "Processing..." : "Generate Tiled Outputs"}
+        </button>
+        {isLoading && (
+          <div className="w-64 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-purple-600 transition-all duration-300" 
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Success Message */}
       {success && !error && (
@@ -460,34 +449,85 @@ function App() {
 
       {/* Output Display */}
       {outputImages.length > 0 && (
-        <div className="w-full max-w-3xl p-6 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 flex flex-col items-center space-y-4 shadow-xl">
+        <div className="w-full max-w-4xl p-6 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 flex flex-col items-center space-y-4 shadow-xl">
           <h2 className="text-xl font-semibold">Tiled Output Images</h2>
-          <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
-            {outputImages.map((img, idx) => (
-              <div key={idx} className="flex flex-col items-center">
-                <img
-                  src={img}
-                  alt={`Tiled Output ${idx + 1}`}
-                  className="max-w-full max-h-48 h-auto rounded shadow-lg"
-                />
-                <span className="text-xs mt-1">Output {idx + 1}</span>
-              </div>
-            ))}
+          <div 
+            ref={scrollParentRef}
+            className="w-full max-h-[600px] overflow-auto"
+          >
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualItem) => (
+                <div
+                  key={virtualItem.key}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: virtualItem.size,
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <div className="flex flex-col items-center p-4">
+                    <div className="relative group w-full max-w-[1024px]">
+                      <img
+                        src={outputImages[virtualItem.index]}
+                        alt={`Tiled Output ${virtualItem.index + 1}`}
+                        className="w-full h-auto rounded shadow-lg bg-neutral-100 dark:bg-neutral-800"
+                        loading="lazy"
+                        style={{ imageRendering: 'pixelated' }}
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle">❌</text></svg>';
+                          target.className += ' bg-red-50 dark:bg-red-900/20';
+                        }}
+                      />
+                      <div className="absolute inset-0 w-full h-full flex items-center justify-center gap-4 bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded">
+                        <button
+                          onClick={() => window.open(outputImages[virtualItem.index], '_blank')}
+                          className="px-3 py-1.5 bg-blue-600 rounded hover:bg-blue-700 transition-colors"
+                        >
+                          View Full Size
+                        </button>
+                        <button
+                          onClick={() => handleSingleImageDownload(outputImages[virtualItem.index], virtualItem.index)}
+                          className="px-3 py-1.5 bg-green-600 rounded hover:bg-green-700 transition-colors"
+                        >
+                          Download
+                        </button>
+                      </div>
+                    </div>
+                    <div className="text-xs mt-2 text-gray-600 dark:text-gray-400">
+                      Tiled Output {virtualItem.index + 1} ({selectedGrid.cols}x{selectedGrid.rows} at {selectedScale}x scale)
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
           <button
             onClick={handleDownloadZip}
             disabled={isLoading}
-            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200"
+            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200 mt-4"
           >
-            {isLoading ? "Creating Zip..." : "Download All"}
+            {isLoading ? "Creating Zip..." : "Download Tiled Outputs"}
           </button>
         </div>
       )}
 
       {/* Footer */}
       <footer className="mt-8 text-sm text-gray-500 dark:text-gray-400 text-center pb-6">
-        Built with Tauri, React, TypeScript, and Tailwind CSS
+        Built with React, TypeScript, and Tailwind CSS
       </footer>
+
+      {/* Add Carbon Ads */}
+      <CarbonAds />
     </main>
   );
 }
