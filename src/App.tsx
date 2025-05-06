@@ -157,6 +157,12 @@ function App() {
     }
   };
 
+  const handleSingleImageDownload = (imageData: string, index: number) => {
+    const imgData = imageData.split(',')[1];
+    const blob = new Blob([Uint8Array.from(atob(imgData), c => c.charCodeAt(0))], { type: 'image/png' });
+    downloadBlob(blob, `tiled_${index + 1}_${selectedGrid.cols}x${selectedGrid.rows}_scale${selectedScale}${addPerlin ? '_perlin' : ''}.png`);
+  };
+
   // Helper function to read files as base64
   const readFilesAsBase64 = async (files: File[]): Promise<string[]> => {
     return Promise.all(
@@ -380,14 +386,24 @@ function App() {
         )}
       </div>
 
-      {/* Tiling Button */}
-      <button
-        onClick={handleTileImages}
-        disabled={isLoading || imagesBase64.length === 0}
-        className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded text-lg disabled:opacity-50 transition-colors duration-200 shadow-lg"
-      >
-        {isLoading ? "Processing..." : "Generate Tiled Outputs"}
-      </button>
+      {/* Tiling Button and Progress */}
+      <div className="flex flex-col items-center gap-2">
+        <button
+          onClick={handleTileImages}
+          disabled={isLoading || imagesBase64.length === 0}
+          className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded text-lg disabled:opacity-50 transition-colors duration-200 shadow-lg"
+        >
+          {isLoading ? "Processing..." : "Generate Tiled Outputs"}
+        </button>
+        {isLoading && (
+          <div className="w-64 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-purple-600 transition-all duration-300" 
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Success Message */}
       {success && !error && (
@@ -405,24 +421,48 @@ function App() {
 
       {/* Output Display */}
       {outputImages.length > 0 && (
-        <div className="w-full max-w-3xl p-6 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 flex flex-col items-center space-y-4 shadow-xl">
+        <div className="w-full max-w-4xl p-6 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 flex flex-col items-center space-y-4 shadow-xl">
           <h2 className="text-xl font-semibold">Tiled Output Images</h2>
-          <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+          <div className="grid gap-6 w-full">
             {outputImages.map((img, idx) => (
               <div key={idx} className="flex flex-col items-center">
-                <img
-                  src={img}
-                  alt={`Tiled Output ${idx + 1}`}
-                  className="max-w-full max-h-48 h-auto rounded shadow-lg"
-                />
-                <span className="text-xs mt-1">Output {idx + 1}</span>
+                <div className="relative group w-full max-w-[1024px]">
+                  <img
+                    src={img}
+                    alt={`Tiled Output ${idx + 1}`}
+                    className="w-full h-auto rounded shadow-lg bg-neutral-100 dark:bg-neutral-800"
+                    style={{ imageRendering: 'pixelated' }}
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle">❌</text></svg>';
+                      target.className += ' bg-red-50 dark:bg-red-900/20';
+                    }}
+                  />
+                  <div className="absolute inset-0 w-full h-full flex items-center justify-center gap-4 bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded">
+                    <button
+                      onClick={() => window.open(img, '_blank')}
+                      className="px-3 py-1.5 bg-blue-600 rounded hover:bg-blue-700 transition-colors"
+                    >
+                      View Full Size
+                    </button>
+                    <button
+                      onClick={() => handleSingleImageDownload(img, idx)}
+                      className="px-3 py-1.5 bg-green-600 rounded hover:bg-green-700 transition-colors"
+                    >
+                      Download
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs mt-2 text-gray-600 dark:text-gray-400">
+                  Tiled Output {idx + 1} ({selectedGrid.cols}x{selectedGrid.rows} at {selectedScale}x scale)
+                </div>
               </div>
             ))}
           </div>
           <button
             onClick={handleDownloadZip}
             disabled={isLoading}
-            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200"
+            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200 mt-4"
           >
             {isLoading ? "Creating Zip..." : "Download Tiled Outputs"}
           </button>

@@ -7,25 +7,54 @@ export interface ProcessingOptions {
   isDryRun: boolean;
 }
 
-export async function processImage(
-  imgBase64: string, 
-  options: ProcessingOptions
-): Promise<string> {
-  try {
-    return await createTiledImage(
-      imgBase64,
-      options.gridSize.cols,
-      options.gridSize.rows,
-      options.scale,
-      options.addPerlin && !options.isDryRun
-    );
-  } catch (err) {
-    console.error('Error processing image:', err);
-    throw err;
+export async function processImage(imgBase64: string, options: ProcessingOptions): Promise<string> {
+  // Load image and create canvas
+  const img = await loadImage(imgBase64);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+
+  // Calculate dimensions
+  const tileWidth = img.width;
+  const tileHeight = img.height;
+  canvas.width = tileWidth * options.gridSize.cols * options.scale;
+  canvas.height = tileHeight * options.gridSize.rows * options.scale;
+
+  // Draw the image in a grid pattern
+  for (let row = 0; row < options.gridSize.rows; row++) {
+    for (let col = 0; col < options.gridSize.cols; col++) {
+      const x = col * tileWidth * options.scale;
+      const y = row * tileHeight * options.scale;
+      ctx.drawImage(
+        img,
+        x, y,
+        tileWidth * options.scale,
+        tileHeight * options.scale
+      );
+    }
   }
+
+  // Add perlin noise if needed
+  if (options.addPerlin && !options.isDryRun) {
+    addPerlinNoise(ctx, canvas.width, canvas.height);
+  }
+
+  // Return as data URL
+  return canvas.toDataURL('image/png', options.isDryRun ? 0.8 : 1.0);
 }
 
-function addNoise(data: Uint8ClampedArray, amount = 10): void {
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+function addPerlinNoise(ctx: CanvasRenderingContext2D, width: number, height: number, amount = 10) {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+
   for (let i = 0; i < data.length; i += 16) {
     const noise = (Math.random() - 0.5) * amount;
     for (let j = 0; j < 4; j++) {
@@ -37,4 +66,6 @@ function addNoise(data: Uint8ClampedArray, amount = 10): void {
       }
     }
   }
+
+  ctx.putImageData(imageData, 0, 0);
 }
