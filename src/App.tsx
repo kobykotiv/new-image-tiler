@@ -453,32 +453,16 @@ function App() {
           <h2 className="text-xl font-semibold">Tiled Output Images</h2>
           <div 
             ref={scrollParentRef}
-            className="w-full max-h-[600px] overflow-auto"
+            className="w-full max-h-[80vh] overflow-auto"
           >
-            <div
-              style={{
-                height: `${rowVirtualizer.getTotalSize()}px`,
-                width: '100%',
-                position: 'relative',
-              }}
-            >
-              {rowVirtualizer.getVirtualItems().map((virtualItem) => (
-                <div
-                  key={virtualItem.key}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: virtualItem.size,
-                    transform: `translateY(${virtualItem.start}px)`,
-                  }}
-                >
-                  <div className="flex flex-col items-center p-4">
-                    <div className="relative group w-full max-w-[1024px]">
+            <div className="flex flex-wrap gap-4 p-4">
+              {outputImages.map((img, idx) => (
+                <div key={idx} className="flex-grow-0 flex-shrink-0 basis-[calc(50%-0.5em)] min-w-[300px]">
+                  <div className="flex flex-col items-center">
+                    <div className="relative group w-full">
                       <img
-                        src={outputImages[virtualItem.index]}
-                        alt={`Tiled Output ${virtualItem.index + 1}`}
+                        src={img}
+                        alt={`Tiled Output ${idx + 1}`}
                         className="w-full h-auto rounded shadow-lg bg-neutral-100 dark:bg-neutral-800"
                         loading="lazy"
                         style={{ imageRendering: 'pixelated' }}
@@ -490,13 +474,13 @@ function App() {
                       />
                       <div className="absolute inset-0 w-full h-full flex items-center justify-center gap-4 bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded">
                         <button
-                          onClick={() => window.open(outputImages[virtualItem.index], '_blank')}
+                          onClick={() => window.open(img, '_blank')}
                           className="px-3 py-1.5 bg-blue-600 rounded hover:bg-blue-700 transition-colors"
                         >
                           View Full Size
                         </button>
                         <button
-                          onClick={() => handleSingleImageDownload(outputImages[virtualItem.index], virtualItem.index)}
+                          onClick={() => handleSingleImageDownload(img, idx)}
                           className="px-3 py-1.5 bg-green-600 rounded hover:bg-green-700 transition-colors"
                         >
                           Download
@@ -504,13 +488,14 @@ function App() {
                       </div>
                     </div>
                     <div className="text-xs mt-2 text-gray-600 dark:text-gray-400">
-                      Tiled Output {virtualItem.index + 1} ({selectedGrid.cols}x{selectedGrid.rows} at {selectedScale}x scale)
+                      Tiled Output {idx + 1} ({selectedGrid.cols}x{selectedGrid.rows} at {selectedScale}x scale)
                     </div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
+
           <button
             onClick={handleDownloadZip}
             disabled={isLoading}
