@@ -1,5 +1,6 @@
 import { useState, useRef, DragEvent } from "react";
 import JSZip from 'jszip';
+import { useImageProcessing } from './hooks/use-image-processing';
 
 // Helper function to read file as base64
 async function fileToBase64(file: File): Promise<string> {
@@ -52,6 +53,8 @@ function App() {
   const [selectedScale, setSelectedScale] = useState(1);
   const [isDryRun, setIsDryRun] = useState(false);
   const [addPerlin, setAddPerlin] = useState(false);
+
+  const { processImages, isProcessing: processing, progress } = useImageProcessing();
 
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
@@ -108,40 +111,12 @@ function App() {
     setOutputImages([]);
 
     try {
-      // For each image, create tiled version using Canvas
-      const results: string[] = [];
-      for (const imgBase64 of imagesBase64) {
-        const img = await createImageBitmap(await (await fetch(imgBase64)).blob());
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d')!;
-        
-        const tileWidth = img.width;
-        const tileHeight = img.height;
-        canvas.width = tileWidth * selectedGrid.cols * selectedScale;
-        canvas.height = tileHeight * selectedGrid.rows * selectedScale;
-        
-        // Draw the tiles
-        for (let row = 0; row < selectedGrid.rows; row++) {
-          for (let col = 0; col < selectedGrid.cols; col++) {
-            ctx.drawImage(
-              img,
-              col * tileWidth * selectedScale,
-              row * tileHeight * selectedScale,
-              tileWidth * selectedScale,
-              tileHeight * selectedScale
-            );
-          }
-        }
-        
-        if (addPerlin) {
-          // Add perlin noise effect
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          // ... implement perlin noise effect ...
-          ctx.putImageData(imageData, 0, 0);
-        }
-        
-        results.push(canvas.toDataURL('image/png'));
-      }
+      const results = await processImages(imagesBase64, {
+        gridSize: selectedGrid,
+        scale: selectedScale,
+        addPerlin,
+        isDryRun
+      });
       
       setOutputImages(results);
       setSuccess(isDryRun
@@ -150,7 +125,7 @@ function App() {
       );
     } catch (err) {
       console.error("Error tiling images:", err);
-      setError(`Error tiling images: ${String(err)}`);
+      setError(`Error tiling images: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoading(false);
     }
@@ -161,13 +136,7 @@ function App() {
       setIsLoading(true);
       const zip = new JSZip();
 
-      // Add original images to zip
-      imagesBase64.forEach((img, index) => {
-        const imgData = img.split(',')[1];
-        zip.file(`original_${index + 1}.png`, imgData, { base64: true });
-      });
-
-      // Add tiled outputs to zip
+      // Only add tiled outputs to zip
       outputImages.forEach((img, index) => {
         const imgData = img.split(',')[1];
         zip.file(
@@ -178,8 +147,8 @@ function App() {
       });
 
       const blob = await zip.generateAsync({ type: "blob" });
-      downloadBlob(blob, "tiled-images.zip");
-      setSuccess("All files saved successfully!");
+      downloadBlob(blob, "tiled-outputs.zip");
+      setSuccess("All tiled outputs saved successfully!");
     } catch (err) {
       console.error("Error creating zip:", err);
       setError(`Error creating zip file: ${err}`);
@@ -455,7 +424,7 @@ function App() {
             disabled={isLoading}
             className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200"
           >
-            {isLoading ? "Creating Zip..." : "Download All"}
+            {isLoading ? "Creating Zip..." : "Download Tiled Outputs"}
           </button>
         </div>
       )}
