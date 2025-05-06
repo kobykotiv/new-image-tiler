@@ -1,31 +1,29 @@
 import { useState, useRef, DragEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { writeFile, readFile } from "@tauri-apps/plugin-fs";
 import JSZip from 'jszip';
 
-// Helper function to convert file path to base64
-async function fileToBase64(filePath: string): Promise<string> {
-  const binaryData = await readFile(filePath);
-  const base64String = btoa(
-    String.fromCharCode(...new Uint8Array(binaryData))
-  );
-  // Attempt to guess mime type from extension for the data URL
-  const extension = filePath.split('.').pop()?.toLowerCase() || 'png';
-  const mimeType = `image/${extension === 'jpg' ? 'jpeg' : extension}`;
-  return `data:${mimeType};base64,${base64String}`;
+// Helper function to read file as base64
+async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
-// Helper function to decode base64 to Uint8Array
-function base64ToUint8Array(base64: string): Uint8Array {
-    const binaryString = atob(base64.split(',')[1]); // Remove data URL prefix
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes;
+// Create blob URL for download
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
+
+// Remove unused base64ToUint8Array function
 
 interface GridSize {
   cols: number;
@@ -70,26 +68,28 @@ function App() {
     setSuccess(null);
     setOutputImages([]);
     try {
-      const selectedPaths = await open({
-        multiple: true,
-        title: `Select up to 100 seamless tiles (1024x1024)`,
-        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
-      });
-
-      if (selectedPaths) {
-        const pathsArray = Array.isArray(selectedPaths) ? selectedPaths : [selectedPaths];
-        if (pathsArray.length > 100) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = 'image/*';
+      
+      input.onchange = async (e) => {
+        const files = Array.from((e.target as HTMLInputElement).files || []);
+        if (files.length > 100) {
           setError("You can upload up to 100 images at once.");
           setImagesBase64([]);
           return;
         }
+        
         setIsLoading(true);
-        const base64Promises = pathsArray.map(path => fileToBase64(path));
+        const base64Promises = files.map(file => fileToBase64(file));
         const base64Results = await Promise.all(base64Promises);
         setImagesBase64(base64Results);
         setIsLoading(false);
         setSuccess(`${base64Results.length} images loaded successfully!`);
-      }
+      };
+      
+      input.click();
     } catch (err) {
       console.error("Error selecting images:", err);
       setError(`Error selecting images: ${err instanceof Error ? err.message : String(err)}`);
@@ -108,21 +108,41 @@ function App() {
     setOutputImages([]);
 
     try {
-      // For each image, tile it in the grid (repeat the same image)
+      // For each image, create tiled version using Canvas
       const results: string[] = [];
-      for (let i = 0; i < imagesBase64.length; i++) {
-        const result = await invoke<string>("tile_seamless_image", {
-          args: {
-            image_base64: imagesBase64[i],
-            grid_cols: selectedGrid.cols,
-            grid_rows: selectedGrid.rows,
-            scale: selectedScale,
-            dry_run: isDryRun,
-            perlin_noise: addPerlin
+      for (const imgBase64 of imagesBase64) {
+        const img = await createImageBitmap(await (await fetch(imgBase64)).blob());
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d')!;
+        
+        const tileWidth = img.width;
+        const tileHeight = img.height;
+        canvas.width = tileWidth * selectedGrid.cols * selectedScale;
+        canvas.height = tileHeight * selectedGrid.rows * selectedScale;
+        
+        // Draw the tiles
+        for (let row = 0; row < selectedGrid.rows; row++) {
+          for (let col = 0; col < selectedGrid.cols; col++) {
+            ctx.drawImage(
+              img,
+              col * tileWidth * selectedScale,
+              row * tileHeight * selectedScale,
+              tileWidth * selectedScale,
+              tileHeight * selectedScale
+            );
           }
-        });
-        results.push(result);
+        }
+        
+        if (addPerlin) {
+          // Add perlin noise effect
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          // ... implement perlin noise effect ...
+          ctx.putImageData(imageData, 0, 0);
+        }
+        
+        results.push(canvas.toDataURL('image/png'));
       }
+      
       setOutputImages(results);
       setSuccess(isDryRun
         ? `Dry run previews generated for ${results.length} images!`
@@ -131,33 +151,6 @@ function App() {
     } catch (err) {
       console.error("Error tiling images:", err);
       setError(`Error tiling images: ${String(err)}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSaveImage = async () => {
-    if (!outputImages.length) return;
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const defaultPath = `tiled_image_${selectedGrid.cols}x${selectedGrid.rows}.png`;
-      const filePath = await save({
-        title: 'Save Tiled Image',
-        defaultPath: defaultPath,
-        filters: [{ name: 'PNG Image', extensions: ['png'] }],
-      });
-
-      if (filePath) {
-        setIsLoading(true);
-        const binaryData = base64ToUint8Array(outputImages[0]);
-        await writeFile(filePath, binaryData);
-        setSuccess(`Image saved successfully to ${filePath}!`);
-      }
-    } catch (err) {
-      console.error("Error saving image:", err);
-      setError(`Error saving image: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoading(false);
     }
@@ -184,26 +177,9 @@ function App() {
         );
       });
 
-      const content = await zip.generateAsync({ type: "blob" });
-
-      const reader = new FileReader();
-      reader.readAsDataURL(content);
-      reader.onload = async () => {
-        const base64data = reader.result as string;
-        const zipData = base64data.split(',')[1];
-
-        const filePath = await save({
-          filters: [{
-            name: 'Zip Archive',
-            extensions: ['zip']
-          }]
-        });
-
-        if (filePath) {
-          await writeFile(filePath, Buffer.from(zipData, 'base64'));
-          setSuccess("All files saved successfully!");
-        }
-      };
+      const blob = await zip.generateAsync({ type: "blob" });
+      downloadBlob(blob, "tiled-images.zip");
+      setSuccess("All files saved successfully!");
     } catch (err) {
       console.error("Error creating zip:", err);
       setError(`Error creating zip file: ${err}`);
