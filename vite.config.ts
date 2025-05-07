@@ -1,36 +1,32 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from 'path';
-import { VitePWA } from 'vite-plugin-pwa'; // Import VitePWA
-
-// @ts-expect-error process is a nodejs global
-const host = process.env.TAURI_DEV_HOST;
+import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vitejs.dev/config/
-export default defineConfig(async () => ({
-  base: '/', // Ensures asset paths are absolute from the root
+export default defineConfig({
+  base: '/',
   plugins: [
     react(),
-    VitePWA({ // Add PWA plugin configuration
+    VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'robots.txt', 'icons/*.png'], // Adjust paths if these are in public/icons
+      includeAssets: ['favicon.ico', 'robots.txt', 'icons/*.png'],
       manifest: {
         name: 'Image Tiler',
         short_name: 'ImageTiler',
         description: 'Create tiled patterns from seamless tiles',
-        theme_color: '#4f46e5', // Example color, update as needed
+        theme_color: '#4f46e5',
         icons: [
           {
-            src: 'icons/icon-192x192.png', // Ensure these paths are relative to your public directory
+            src: 'icons/icon-192x192.png',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: 'icons/icon-512x512.png', // Ensure these paths are relative to your public directory
+            src: 'icons/icon-512x512.png',
             sizes: '512x512',
             type: 'image/png'
           }
-          // Add more icons as needed, e.g., for maskable icons
         ]
       }
     })
@@ -40,25 +36,24 @@ export default defineConfig(async () => ({
       '@': path.resolve(__dirname, './src'),
     },
   },
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent vite from obscuring rust errors
-  clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      // 3. tell vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
-    },
+    // Allow host header for deployment environments
+    host: true
   },
-}));
+  preview: {
+    port: 1420,
+    host: true
+  },
+  build: {
+    // Generate sourcemaps for better debugging
+    sourcemap: true,
+    // Output directory
+    outDir: 'dist',
+    // Clean output directory before building
+    emptyOutDir: true,
+    // Ensure chunks are optimized for production
+    chunkSizeWarningLimit: 1000,
+  }
+});
