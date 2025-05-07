@@ -4,13 +4,59 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/tauri.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Image Tiler - Create tiled images from multiple source images" />
-    <meta name="theme-color" content="#1a1a2e" />
+    <!-- Add the base tag to ensure proper path resolution -->
+    <base href="/" />
     <title>Image Tiler</title>
+    <!-- Add fallback styles to prevent blank page -->
+    <style>
+      .loading-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid rgba(0, 0, 0, 0.1);
+        border-radius: 50%;
+        border-left: 4px solid #4f46e5;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background-color: #1a1a2a; color: #e1e1e1; }
+        .loading-spinner { border-color: rgba(255, 255, 255, 0.1); border-left-color: #818cf8; }
+      }
+    </style>
   </head>
-
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Fallback content that will show while React loads -->
+      <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <p style="margin-top: 20px;">Loading Application...</p>
+      </div>
+    </div>
+    <!-- Error handling script -->
+    <script>
+      window.addEventListener('error', function(e) {
+        console.error('Global error caught:', e);
+        if (document.getElementById('root')) {
+          document.getElementById('root').innerHTML = 
+            '<div style="padding: 20px; text-align: center;">' +
+            '<h2>Something went wrong</h2>' +
+            '<p>Error: ' + (e.message || 'Unknown error') + '</p>' +
+            '<button onclick="window.location.reload()" style="padding: 8px 16px; background: #4f46e5; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 20px;">Reload Page</button>' +
+            '</div>';
+        }
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
