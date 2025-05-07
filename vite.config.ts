@@ -7,6 +7,7 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
+  base: '/', // Ensures asset paths are absolute from the root
   plugins: [react()],
   resolve: {
     alias: {
